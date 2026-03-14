@@ -1,0 +1,218 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../generated/prisma"
+  previewFeatures = ["views"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------
+// ENUMS
+// ---------------------------------------------------------
+
+enum TransactionType {
+  RECEITA
+  DESPESA
+  TRANSFERENCIA
+  REEMBOLSAVEL // Renamed from COMPENSACAO
+  AJUSTE
+
+  @@map("tipo_transacao")
+}
+
+enum OperationType {
+  RECEITA
+  DESPESA
+  ENVIO
+  RECEBIMENTO
+
+  @@map("tipo_operacao")
+}
+
+enum BucketType {
+  CARTEIRA
+  CARTAO
+  RESERVA
+
+  @@map("tipo_bucket")
+}
+
+enum TransactionStatus {
+  PLANEJADO
+  CONFIRMADO
+  COMPLETADO
+  RECONCILIADO
+
+  @@map("status_transacao")
+}
+
+enum RecurrenceFrequency {
+  DIARIA
+  SEMANAL
+  MENSAL
+  ANUAL
+
+  @@map("frequencia_recorrencia")
+}
+
+enum RecurrenceAmountType {
+  FIXO
+  PARCELADO
+  VARIAVEL
+
+  @@map("tipo_valor_recorrencia")
+}
+
+enum SeriesType {
+  RECORRENCIA
+  PARCELAMENTO
+
+  @@map("tipo_serie")
+}
+
+// ---------------------------------------------------------
+// MODELS
+// ---------------------------------------------------------
+
+model CostCenter {
+  id     Int     @id @default(autoincrement())
+  name   String  @map("nome") @db.VarChar(100)
+  active Boolean @default(true) @map("ativo")
+
+  buckets      Bucket[]
+  transactions Transaction[]
+
+  @@map("centro_custo")
+}
+
+model Category {
+  id   Int    @id @default(autoincrement())
+  name String @map("nome") @db.VarChar(100)
+
+  transactions Transaction[]
+
+  @@map("categoria")
+}
+
+model Bucket {
+  id      Int        @id @default(autoincrement())
+  name    String     @map("nome") @db.VarChar(100)
+  type    BucketType @map("tipo")
+  ownerId Int?       @map("dono_id")
+
+  owner     CostCenter? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  movements Movement[]
+
+  balance    BucketBalance?
+  operations TransactionOperation[]
+
+  @@map("bucket")
+}
+
+model Transaction {
+  id           Int      @id @default(autoincrement())
+  costCenterId Int?     @map("centro_custo_id")
+  categoryId   Int?     @map("categoria_id")
+  seriesId     Int?     @map("serie_id")
+  description  String   @map("descricao") @db.VarChar(255)
+  amount       Int      @map("valor")
+  date         DateTime @map("data_competencia") @db.Date
+
+  type      TransactionType   @map("tipo")
+  status    TransactionStatus @map("status")
+  isShared  Boolean           @default(false) @map("is_shared")
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  costCenter CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  category   Category?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  series     Series?     @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  movements  Movement[]
+
+  operations TransactionOperation[]
+
+  @@map("transacao")
+}
+
+model Movement {
+  id            Int @id @default(autoincrement())
+  bucketId      Int @map("bucket_id")
+  transactionId Int @map("transacao_id")
+  amount        Int @map("valor")
+  date DateTime? @map("data_pagto") @db.Date
+
+  operation OperationType @map("operacao")
+
+  bucket      Bucket      @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@map("movimentacao")
+}
+
+model Series {
+  id   Int        @id @default(autoincrement())
+  name String     @map("nome") @db.VarChar(100)
+  type SeriesType @map("tipo")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  transactions Transaction[]
+  recurrence   Recurrence?
+  installment  Installment?
+
+  @@map("serie")
+}
+
+model Installment {
+  seriesId Int    @id @map("serie_id")
+  series   Series @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  startDate         DateTime @map("data_inicio") @db.Date
+  installmentCount  Int      @map("nro_parcelas")
+  totalAmount       Int      @map("valor_total")
+  installmentAmount Int      @map("valor_parcela")
+
+  @@map("parcelamento")
+}
+
+model Recurrence {
+  seriesId Int    @id @map("serie_id")
+  series   Series @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  active Boolean @default(true) @map("ativo")
+
+  frequency  RecurrenceFrequency  @map("frequencia")
+  type       TransactionType      @map("tipo")
+  amountType RecurrenceAmountType @map("tipo_valor")
+
+  config Json @map("configuracao")
+
+  @@map("recorrencia")
+}
+
+// ---------------------------------------------------------
+// VIEWS
+// ---------------------------------------------------------
+
+view BucketBalance {
+  bucketId Int @unique @map("bucket_id")
+  amount   Int @map("saldo")
+
+  bucket Bucket @relation(fields: [bucketId], references: [id])
+
+  @@map("bucket_saldo")
+}
+
+view TransactionOperation {
+  transactionId Int    @map("transacao_id")
+  bucketId      Int    @map("bucket_id")
+  operation     String @map("operacao")
+
+  bucket      Bucket      @relation(fields: [bucketId], references: [id])
+  transaction Transaction @relation(fields: [transactionId], references: [id])
+
+  @@unique([transactionId, bucketId])
+  @@map("transaction_operation")
+}
